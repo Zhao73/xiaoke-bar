@@ -1,0 +1,60 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+  :root { --coral:#E8835F; --coral2:#FA9E73; --violet:#9E8CFF; --ink:#F6EFEA; --mute:#B9ABA3; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html,body { width:1600px; height:820px; overflow:hidden; }
+  body { background:#120E0D; font-family:-apple-system, "SF Pro Display", "Helvetica Neue", sans-serif; color:var(--ink); position:relative; }
+  .glow { position:absolute; border-radius:50%; filter:blur(90px); }
+  .g1 { width:760px; height:620px; left:760px; top:60px; background:radial-gradient(circle,#D96B4D 0%,rgba(217,107,77,0) 70%); opacity:.55; }
+  .g2 { width:520px; height:520px; left:1180px; top:-180px; background:radial-gradient(circle,#7C6BFF 0%,rgba(124,107,255,0) 70%); opacity:.45; }
+  .g3 { width:600px; height:420px; left:-160px; top:520px; background:radial-gradient(circle,#2FB3A6 0%,rgba(47,179,166,0) 70%); opacity:.22; }
+  .grid { position:absolute; inset:0; background-image:linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.035) 1px,transparent 1px); background-size:32px 32px; mask-image:radial-gradient(ellipse at 30% 50%,#000 20%,transparent 75%); }
+
+  .copy { position:absolute; left:96px; top:118px; width:640px; }
+  .kicker { display:inline-flex; align-items:center; gap:10px; font-size:15px; font-weight:600; letter-spacing:.02em; color:#FFCDB8; background:rgba(232,131,95,.12); border:1px solid rgba(232,131,95,.35); padding:7px 14px; border-radius:999px; }
+  .dot { width:8px; height:8px; border-radius:50%; background:#5CDB9E; box-shadow:0 0 10px #5CDB9E; }
+  h1 { margin-top:26px; font-size:92px; line-height:.95; font-weight:800; letter-spacing:-.035em; }
+  h1 .grad { background:linear-gradient(100deg,#FFB590 0%,#E8835F 45%,#B48CFF 100%); -webkit-background-clip:text; color:transparent; }
+  .cn { margin-top:14px; font-size:22px; font-weight:600; color:var(--mute); letter-spacing:.12em; }
+  p.lead { margin-top:26px; font-size:25px; line-height:1.42; color:#E9DDD6; font-weight:450; max-width:600px; }
+  p.lead b { color:#fff; font-weight:650; }
+  .chips { margin-top:30px; display:flex; flex-wrap:wrap; gap:10px; max-width:620px; }
+  .chip { font-size:15px; font-weight:600; padding:8px 14px; border-radius:11px; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.1); color:#EDE3DD; }
+  .chip i { font-style:normal; display:inline-block; width:9px; height:9px; border-radius:3px; margin-right:8px; vertical-align:1px; }
+  .pets { position:absolute; left:100px; bottom:58px; display:flex; gap:34px; align-items:flex-end; }
+  .pets img { height:84px; image-rendering:pixelated; }
+
+  .stage { position:absolute; left:860px; top:0; width:740px; height:820px; }
+  .panel { position:absolute; border-radius:22px; overflow:hidden; box-shadow:0 40px 90px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.08); }
+  .panel img { display:block; width:100%; }
+  .p-back { width:340px; left:360px; top:150px; transform:rotate(6deg); opacity:.9; }
+  .p-front { width:420px; left:70px; top:52px; transform:rotate(-2deg); }
+  .float { position:absolute; width:356px; left:-10px; top:452px; filter:drop-shadow(0 24px 40px rgba(0,0,0,.55)); }
+</style></head>
+<body>
+  <div class="glow g1"></div><div class="glow g2"></div><div class="glow g3"></div><div class="grid"></div>
+
+  <div class="copy">
+    <span class="kicker"><span class="dot"></span>Free &amp; open source · macOS 15+</span>
+    <h1>Xiaoke <span class="grad">Bar</span></h1>
+    <div class="cn">小克额度栏</div>
+    <p class="lead">All your AI coding quotas, <b>live in the menu bar</b> — with pixel pets that act out what your agents are doing.</p>
+    <div class="chips">
+      <span class="chip"><i style="background:#E8835F"></i>Claude Code</span>
+      <span class="chip"><i style="background:#9E8CFF"></i>Codex</span>
+      <span class="chip"><i style="background:#5B8CFF"></i>Gemini</span>
+      <span class="chip"><i style="background:#D8D8D8"></i>Grok</span>
+      <span class="chip"><i style="background:#5CDB9E"></i>API bills</span>
+      <span class="chip"><i style="background:#F5C451"></i>Token stats</span>
+    </div>
+  </div>
+  <div class="pets">
+    <img src="p-claude.png"><img src="p-codex.png"><img src="p-grok.png"><img src="p-gemini.png">
+  </div>
+
+  <div class="stage">
+    <div class="panel p-back"><img src="stats.png"></div>
+    <div class="panel p-front"><img src="usage.png"></div>
+  </div>
+</body></html>
