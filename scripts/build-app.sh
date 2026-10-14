@@ -1,5 +1,7 @@
 #!/bin/zsh
-# 编译并打包成 小克额度栏.app（本机自签名），默认装到 ~/Applications
+# 编译并打包成 小克额度栏.app，默认本机自签名（ad-hoc）
+# 用法：./scripts/build-app.sh [--install]
+#      SIGN_ID="Developer ID Application: …" ./scripts/build-app.sh   用开发者证书签名（强化运行时，可公证）
 set -euo pipefail
 cd "$(dirname "$0")/.."
 VERSION="1.1.0"
@@ -29,7 +31,12 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
 </dict></plist>
 PLIST
-codesign --force --deep -s - "$APP"
+if [[ -n "${SIGN_ID:-}" ]]; then
+  codesign --force --options runtime --timestamp --entitlements Resources/XiaokeBar.entitlements -s "$SIGN_ID" "$APP"
+  codesign --verify --strict --verbose=2 "$APP"
+else
+  codesign --force --deep -s - "$APP"
+fi
 if [[ "${1:-}" == "--install" ]]; then
   mkdir -p ~/Applications
   rm -rf ~/Applications/小克额度栏.app

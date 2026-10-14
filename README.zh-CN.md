@@ -102,13 +102,7 @@
 
 1. 从 [最新版本](https://github.com/Zhao73/xiaoke-bar/releases/latest) 下载 `XiaokeBar.zip` 并解压。
 2. 把 **小克额度栏.app** 拖到「应用程序」文件夹。
-3. 目前还没有经过 Apple 公证，第一次打开会被系统拦下。二选一：
-
-   ```bash
-   xattr -dr com.apple.quarantine "/Applications/小克额度栏.app"
-   ```
-
-   或者先双击一次，再去 **系统设置 → 隐私与安全性**，点「仍要打开」。
+3. 双击打开。App 已用开发者证书签名并通过 Apple 公证，和普通软件一样直接打开。
 
 需要 macOS 15 及以上、Apple 芯片的 Mac（Intel 机型可以从源码编译，未测试）。另外至少要装好并登录 Claude Code、Codex、Gemini CLI、Grok Build 其中之一，才有东西可显示。
 
@@ -126,6 +120,7 @@ swift test
 ```bash
 .build/release/XiaokeBar --selftest                       # 不开界面，打印能读到的额度和统计
 XIAOKE_DEMO=1 .build/release/XiaokeBar --snapshot out/    # 用内置假数据把每个页面渲染成图片
+./scripts/notarize.sh                                     # 开发者证书签名 + 公证 + 打包（维护者用）
 ./scripts/readme-assets/make.sh                           # 重新生成本 README 里的图片
 python3 scripts/l10n_check.py                             # 检查漏翻的界面文字
 ```

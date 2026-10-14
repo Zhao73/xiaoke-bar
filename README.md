@@ -102,13 +102,7 @@ Extra Claude accounts are picked up automatically from launcher scripts in `~/.l
 
 1. Download `XiaokeBar.zip` from the [latest release](https://github.com/Zhao73/xiaoke-bar/releases/latest) and unzip it.
 2. Move **小克额度栏.app** to `/Applications`.
-3. The build is not notarized by Apple yet, so macOS will block the first launch. Either run
-
-   ```bash
-   xattr -dr com.apple.quarantine "/Applications/小克额度栏.app"
-   ```
-
-   or try to open it once, then go to **System Settings → Privacy & Security** and click **Open Anyway**.
+3. Open it. The app is signed with a Developer ID and notarized by Apple, so it opens like any other app.
 
 Requires macOS 15 or later on Apple silicon (Intel Macs: build from source — untested). You need at least one of Claude Code, Codex, Gemini CLI or Grok Build installed and logged in for there to be something to show.
 
@@ -126,6 +120,7 @@ Only the Xcode command line tools are needed. Other handy commands:
 ```bash
 .build/release/XiaokeBar --selftest                       # print what it can read, no UI
 XIAOKE_DEMO=1 .build/release/XiaokeBar --snapshot out/    # render every screen with fake demo data
+./scripts/notarize.sh                                     # Developer ID sign + notarize + zip (maintainers)
 ./scripts/readme-assets/make.sh                           # regenerate the images in this README
 python3 scripts/l10n_check.py                             # find untranslated UI strings
 ```
