@@ -53,7 +53,7 @@ shutil.copy(f'{tmp}/en/dark-0-quota.png', f'{hero}/usage.png')
 shutil.copy(f'{tmp}/en/dark-2-stats.png', f'{hero}/stats.png')
 im = Image.open(f'{tmp}/en/frames/f030.png').convert('RGBA')
 bg = im.getpixel((2, 2))
-cw, ch = (im.width - 20) // 7, (im.height - 20) // 4   # 7 个动作 × 4 只宠物
+cw, ch = (im.width - 40) // 7, (im.height - 40) // 4   # 7 个动作 × 4 只宠物（2 倍图，四周各 20px 边距）
 for r, c, n in [(0, 1, 'p-claude'), (1, 4, 'p-codex'), (2, 6, 'p-grok'), (3, 2, 'p-gemini')]:
     cell = im.crop((20 + c * cw, 20 + r * ch, 20 + (c + 1) * cw, 20 + (r + 1) * ch))
     px = cell.load()
