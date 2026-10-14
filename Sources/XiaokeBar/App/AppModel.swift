@@ -194,11 +194,9 @@ final class AppModel {
         refreshTimer?.invalidate()
         // 有会话在跑时额度 2 分钟刷新一次（官方接口限流很严，再快会被 429），平时按设置的间隔
         let minutes = claudeActive ? min(2, max(1, refreshMinutes)) : max(1, refreshMinutes)
+        // 只刷新额度；token 统计由 tick 里的热扫描（30 秒）和全量扫描（10 分钟）负责
         refreshTimer = Timer.scheduledTimer(withTimeInterval: Double(minutes) * 60, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                await self?.refreshAll()
-                await self?.rescan()
-            }
+            Task { @MainActor in await self?.refreshAll() }
         }
     }
 
@@ -206,7 +204,8 @@ final class AppModel {
     func popoverOpened() {
         popoverVisible = true
         tick()
-        Task { await rescan() }
+        // 一分钟内刚全量扫过就不再扫（来回开关面板时不重复遍历几千个文件）
+        if Date().timeIntervalSince(lastFullScanAt) > 60 { Task { await rescan() } }
         if let t = lastRefresh, Date().timeIntervalSince(t) < 120 { return }
         Task { await refreshAll() }
     }
@@ -218,6 +217,8 @@ final class AppModel {
     private func tick() {
         if Self.demo { return }
         tickCount += 1
+        // 没有会话在干活、面板也关着时，6 秒查一次就够（有会话开始干活最多晚 3 秒发现）
+        if !popoverVisible, !claudeActive, tickCount % 2 == 1 { return }
         driftHappiness()
         system = monitor.sample()
         // 进程表只在面板开着时取（为了显示每个会话的 CPU / 内存）
@@ -245,10 +246,12 @@ final class AppModel {
         let active = list.contains { $0.busy }
         if active != claudeActive { claudeActive = active; scheduleRefresh() }
         // 有会话在跑时每 30 秒热扫一次（只读在跑的那几个会话文件），让会话 token 跟着涨；每 10 分钟全量扫一次
-        if active, Date().timeIntervalSince(lastScanAt) > 30 {
-            let full = Date().timeIntervalSince(lastFullScanAt) > 600
+        let full = Date().timeIntervalSince(lastFullScanAt) > 600
+        if full, Date().timeIntervalSince(lastScanAt) > 30 {
+            Task { await rescan() }
+        } else if active, Date().timeIntervalSince(lastScanAt) > 30 {
             let hot = list.compactMap { l in l.transcript.map { ($0, l.provider) } }
-            Task { await rescan(only: full ? nil : hot) }
+            if !hot.isEmpty { Task { await rescan(only: hot) } }
         }
         // 限流等待到点就马上重查，不用等下一轮定时刷新
         for a in accounts {
@@ -389,9 +392,14 @@ final class AppModel {
     func cheer(_ delta: Double) { happiness = min(100, max(0, happiness + delta)) }
 
     /// 每 3 秒一次：心情慢慢回到 60；额度快用完时往 30 掉
+    private var lastDrift = Date()
+
     private func driftHappiness() {
         let target: Double = (menuPercent ?? 0) >= 95 ? 30 : 60
-        let step = 0.025      // 每 3 秒 0.025 ≈ 每 10 分钟 5 点
+        // 每 3 秒 0.025 ≈ 每 10 分钟 5 点；按实际经过的时间算，检查频率变了速度也不变
+        let now = Date()
+        let step = 0.025 * min(4, now.timeIntervalSince(lastDrift) / 3)
+        lastDrift = now
         if happiness > target + step { happiness -= step } else if happiness < target - step { happiness += step }
     }
 

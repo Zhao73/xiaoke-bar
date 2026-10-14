@@ -143,6 +143,9 @@ final class TokenScanner {
 
     private var dirty = false
     private var lastSave = Date()
+    private var savedOnce = false
+    private var lastSnap: StatsSnapshot?
+    private var lastSnapDay: Date?
 
     private func claudeRoots() -> [String] {
         // 多个账号的 projects 可能是软链接到同一处，按真实路径去重
@@ -155,29 +158,32 @@ final class TokenScanner {
         return Array(roots)
     }
 
-    private func listFiles() -> [(String, Provider)] {
-        var out: [(String, Provider)] = []
-        let fm = FileManager.default
-        for root in claudeRoots() {
-            guard let e = fm.enumerator(atPath: root) else { continue }
-            while let p = e.nextObject() as? String { if p.hasSuffix(".jsonl") { out.append((root + "/" + p, .claude)) } }
-        }
-        for sub in ["/sessions", "/archived_sessions"] {
-            let root = CodexProvider.home + sub
-            guard let e = fm.enumerator(atPath: root) else { continue }
-            while let p = e.nextObject() as? String { if p.hasSuffix(".jsonl") { out.append((root + "/" + p, .codex)) } }
-        }
-        // Gemini CLI：~/.gemini/tmp/<项目>/chats/session-*.json(l)
-        let gem = GeminiProvider.home + "/tmp"
-        if let e = fm.enumerator(atPath: gem) {
-            while let p = e.nextObject() as? String {
-                if p.contains("/chats/session-"), p.hasSuffix(".json") || p.hasSuffix(".jsonl") { out.append((gem + "/" + p, .gemini)) }
+    /// 列出的会话文件，顺便带上大小和修改时间（目录遍历时批量取到，不用再逐个 stat）
+    private typealias Listed = (path: String, prov: Provider, size: UInt64?, mtime: Double?)
+
+    private func walk(_ root: String, _ prov: Provider, into out: inout [Listed], match: (String) -> Bool) {
+        let keys: [URLResourceKey] = [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey]
+        guard let e = FileManager.default.enumerator(at: URL(fileURLWithPath: root, isDirectory: true), includingPropertiesForKeys: keys) else { return }
+        for case let url as URL in e {
+            let v = try? url.resourceValues(forKeys: Set(keys))
+            if v?.isDirectory == true {
+                // 工具输出目录里只有 .txt/.json，没有会话记录，占了三分之一的条目
+                if url.lastPathComponent == "tool-results" { e.skipDescendants() }
+                continue
             }
+            let path = url.path
+            guard match(path) else { continue }
+            out.append((path, prov, v?.fileSize.map { UInt64($0) }, v?.contentModificationDate?.timeIntervalSince1970))
         }
-        let groot = GrokProvider.home + "/sessions"
-        if let e = fm.enumerator(atPath: groot) {
-            while let p = e.nextObject() as? String { if p.hasSuffix("/usage.json") { out.append((groot + "/" + p, .grok)) } }
-        }
+    }
+
+    private func listFiles() -> [Listed] {
+        var out: [Listed] = []
+        for root in claudeRoots() { walk(root, .claude, into: &out) { $0.hasSuffix(".jsonl") } }
+        for sub in ["/sessions", "/archived_sessions"] { walk(CodexProvider.home + sub, .codex, into: &out) { $0.hasSuffix(".jsonl") } }
+        // Gemini CLI：~/.gemini/tmp/<项目>/chats/session-*.json(l)
+        walk(GeminiProvider.home + "/tmp", .gemini, into: &out) { $0.contains("/chats/session-") && ($0.hasSuffix(".json") || $0.hasSuffix(".jsonl")) }
+        walk(GrokProvider.home + "/sessions", .grok, into: &out) { $0.hasSuffix("/usage.json") }
         return out
     }
 
@@ -186,15 +192,16 @@ final class TokenScanner {
     /// 增量扫描并汇总。首次几 GB 日志需要十几秒，之后通常不到 1 秒。
     /// only：只扫这几个文件（有会话在跑时的热扫描，不用把几千个会话文件都列一遍）
     func scan(only: [(String, Provider)]? = nil, progress: ((Double) -> Void)? = nil) -> StatsSnapshot {
-        let files = only.flatMap(canonical) ?? listFiles()
+        let files: [Listed] = only.flatMap(canonical)?.map { ($0.0, $0.1, nil, nil) } ?? listFiles()
         let fm = FileManager.default
         var jobs: [(String, Provider, FileRecord, UInt64, Double)] = []
-        var alive = Set<String>()
-        for (path, prov) in files {
-            alive.insert(path)
-            guard let a = try? fm.attributesOfItem(atPath: path) else { continue }
-            let size = (a[.size] as? NSNumber)?.uint64Value ?? 0
-            let mtime = (a[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        for (path, prov, listedSize, listedMtime) in files {
+            var size = listedSize ?? 0, mtime = listedMtime ?? 0
+            if listedSize == nil || listedMtime == nil {
+                guard let a = try? fm.attributesOfItem(atPath: path) else { continue }
+                size = (a[.size] as? NSNumber)?.uint64Value ?? 0
+                mtime = (a[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+            }
             let old = cache.files[path]
             if let old, old.size == size, old.mtime == mtime { continue }
             var rec = old ?? FileRecord(provider: prov)
@@ -227,13 +234,17 @@ final class TokenScanner {
         lock.lock()
         for (p, r) in results { cache.files[p] = r }
         // 已删除的会话文件：保留统计（历史用量不该因为 Claude Code 清理旧记录而消失），只是不再重扫
-        _ = alive
-        let snap = summarize()
+        // 一个文件都没变就沿用上次的汇总（汇总要过一遍上千个会话）；跨过零点要重算「今天」
+        let today = Calendar.current.startOfDay(for: Date())
+        var snap: StatsSnapshot
+        if results.isEmpty, let last = lastSnap, lastSnapDay == today { snap = last; snap.scannedAt = Date() } else { snap = summarize() }
+        lastSnap = snap; lastSnapDay = today
         lock.unlock()
-        // 缓存文件有好几 MB：有变化才写，而且热扫描时最多 5 分钟写一次。
+        // 缓存文件有好几 MB，编码一次就要几十毫秒：有变化才写，第一次扫完立刻写，之后最多 5 分钟写一次。
         // 读取位置和累计数是一起存的，就算没来得及写、下次从旧位置重读也不会重复计数
         if !jobs.isEmpty { dirty = true }
-        if dirty, only == nil || Date().timeIntervalSince(lastSave) > 300 {
+        if dirty, !savedOnce || Date().timeIntervalSince(lastSave) > 300 {
+            savedOnce = true
             if let d = try? JSONEncoder().encode(cache) { try? d.write(to: cacheURL, options: .atomic) }
             dirty = false
             lastSave = Date()

@@ -80,17 +80,19 @@ enum PetAction: String, Codable, CaseIterable {
     /// 按命令说明（或命令本身）细分：同样是跑终端，截图、提交代码、联网、部署、装依赖、编译各有各的动画
     static func command(_ detail: String?) -> PetAction {
         guard let d = detail?.lowercased() else { return .running }
-        let rules: [(PetAction, [String])] = [
-            (.photo, ["screenshot", "screencapture", "capture", "snapshot", "截图", "截屏", "スクショ"]),
-            (.git, ["git ", "commit", "branch", "merge", "rebase", "push", "pull request", "提交", "分支", "コミット"]),
-            (.deploy, ["deploy", "ssh ", "publish", "release", "upload", "rsync", "wrangler", "vercel", "部署", "上线", "发布", "上传", "デプロイ"]),
-            (.install, ["install", "brew ", "pip ", "npm i ", "pnpm add", "yarn add", "安装", "依赖", "インストール"]),
-            (.building, ["build", "test", "compile", "xcodebuild", "cargo", "make", "gradle", "pytest", "lint", "typecheck", "打包", "编译", "构建", "测试", "ビルド", "テスト"]),
-            (.network, ["curl", "fetch", "download", "http", "api", "request", "query", "查询", "下载", "请求", "联网"]),
-        ]
-        for (a, words) in rules where words.contains(where: { d.contains($0) }) { return a }
+        for (a, words) in commandRules where words.contains(where: { d.contains($0) }) { return a }
         return .running
     }
+
+    /// 界面每次重画都会问一次宠物该做什么动作，关键词表只建一次
+    private static let commandRules: [(PetAction, [String])] = [
+        (.photo, ["screenshot", "screencapture", "capture", "snapshot", "截图", "截屏", "スクショ"]),
+        (.git, ["git ", "commit", "branch", "merge", "rebase", "push", "pull request", "提交", "分支", "コミット"]),
+        (.deploy, ["deploy", "ssh ", "publish", "release", "upload", "rsync", "wrangler", "vercel", "部署", "上线", "发布", "上传", "デプロイ"]),
+        (.install, ["install", "brew ", "pip ", "npm i ", "pnpm add", "yarn add", "安装", "依赖", "インストール"]),
+        (.building, ["build", "test", "compile", "xcodebuild", "cargo", "make", "gradle", "pytest", "lint", "typecheck", "打包", "编译", "构建", "测试", "ビルド", "テスト"]),
+        (.network, ["curl", "fetch", "download", "http", "api", "request", "query", "查询", "下载", "请求", "联网"]),
+    ]
 }
 
 /// 正在运行的一个 AI 编程会话（一个终端里的 claude / codex / grok / gemini 进程）
@@ -203,7 +205,19 @@ enum LiveSessionFinder {
     }
 
     /// Claude Code 把会话记录放在 projects/<把路径里非字母数字都换成 - 的文件夹>/<会话ID>.jsonl
+    private static var transcriptCache: [String: String] = [:]
+
     static func claudeTranscript(configDir: String, cwd: String?, sessionId: String) -> String? {
+        let fm = FileManager.default
+        // 每 3 秒都要找一遍；找到过就记住（找不到时要把 projects 下几百个文件夹挨个试）
+        let key = configDir + "|" + sessionId
+        if let p = transcriptCache[key], fm.fileExists(atPath: p) { return p }
+        let found = locateTranscript(configDir: configDir, cwd: cwd, sessionId: sessionId)
+        if let found { transcriptCache[key] = found }
+        return found
+    }
+
+    private static func locateTranscript(configDir: String, cwd: String?, sessionId: String) -> String? {
         let fm = FileManager.default
         let projects = (configDir + "/projects" as NSString).resolvingSymlinksInPath
         if let cwd {
@@ -219,20 +233,26 @@ enum LiveSessionFinder {
         return nil
     }
 
-    /// 读会话记录末尾，找最后一次调用的工具和它在做什么
+    /// 读会话记录末尾，找最后一次调用的工具和它在做什么。按文件大小缓存，文件没变就不重读。
+    private static var toolCache: [String: (size: UInt64, tool: String?, detail: String?)] = [:]
+    private static let toolMarks = ["\"type\":\"tool_use\"", "\"type\":\"function_call\"", "\"type\":\"custom_tool_call\""].map { Data($0.utf8) }
+
     static func lastTool(transcript: String) -> (tool: String?, detail: String?) {
         guard let fh = FileHandle(forReadingAtPath: transcript) else { return (nil, nil) }
         defer { try? fh.close() }
         let size = (try? fh.seekToEnd()) ?? 0
+        if let c = toolCache[transcript], c.size == size { return (c.tool, c.detail) }
         let start = size > 96_000 ? size - 96_000 : 0
         try? fh.seek(toOffset: start)
         guard let data = try? fh.readToEnd() else { return (nil, nil) }
-        let text = String(decoding: data, as: UTF8.self)
         // Claude：…"type":"tool_use","id":"toolu_…","name":"Bash","input":{…}
         // Codex：…"type":"function_call","name":"exec_command","arguments":"…"
-        let hits = ["\"type\":\"tool_use\"", "\"type\":\"function_call\"", "\"type\":\"custom_tool_call\""].compactMap { text.range(of: $0, options: .backwards) }
-        guard let r = hits.max(by: { $0.lowerBound < $1.lowerBound }) else { return (nil, nil) }
-        let tail = text[r.upperBound...]
+        // 直接在字节里从后往前找，只把命中后面一小段转成字符串
+        guard let r = toolMarks.compactMap({ data.range(of: $0, options: .backwards) }).max(by: { $0.lowerBound < $1.lowerBound }) else {
+            toolCache[transcript] = (size, nil, nil)
+            return (nil, nil)
+        }
+        let tail = String(decoding: data[r.upperBound..<min(r.upperBound + 8000, data.endIndex)], as: UTF8.self)
         let name = value(in: tail, key: "\"name\":\"")
         var detail: String?
         for key in ["\"description\":\"", "\"file_path\":\"", "\"pattern\":\"", "\"query\":\"", "\"url\":\"", "\"command\":\"", "\"cmd\":\""] {
@@ -241,15 +261,17 @@ enum LiveSessionFinder {
                 break
             }
         }
+        toolCache[transcript] = (size, name, detail)
         return (name, detail)
     }
 
     /// 还没返回结果的子代理：发出了 Agent / Task / spawn_agent 调用，但记录里还没有对应的结果
-    private static var agentCache: [String: (size: UInt64, n: Int)] = [:]
+    private static var agentCache: [String: (size: UInt64, n: Int, at: Date)] = [:]
 
     static func pendingSubagents(transcript: String) -> Int {
         let size = (try? FileManager.default.attributesOfItem(atPath: transcript)[.size] as? UInt64) ?? 0
-        if let c = agentCache[transcript], c.size == size { return c.n }
+        // 干活时文件每秒都在变大；子代理数量不用秒级精确，同一个文件最多 10 秒重算一次（要在 400KB 里跑正则）
+        if let c = agentCache[transcript], c.size == size || Date().timeIntervalSince(c.at) < 10 { return c.n }
         guard let fh = FileHandle(forReadingAtPath: transcript) else { return 0 }
         defer { try? fh.close() }
         try? fh.seek(toOffset: size > 400_000 ? size - 400_000 : 0)
@@ -266,7 +288,7 @@ enum LiveSessionFinder {
                 if !text.contains("\"tool_use_id\":\"\(id)\"") && !text.contains("\"call_id\":\"\(id)\",\"output") { n += 1 }
             }
         }
-        agentCache[transcript] = (size, n)
+        agentCache[transcript] = (size, n, Date())
         return n
     }
 
