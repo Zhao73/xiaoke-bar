@@ -1,5 +1,7 @@
 import SwiftUI
+#if os(macOS)
 import AppKit
+#endif
 
 /// 宠物的画法只依赖这几个绘图动作，于是同一套代码可以画到两种地方：
 /// - SwiftUIPainter：SwiftUI 的 Canvas（截图、动作图鉴用）
@@ -46,6 +48,7 @@ struct SwiftUIPainter: PetPainter {
     }
 }
 
+#if os(macOS)
 /// Core Graphics 版本。变换和透明度记在结构体里、每次画时才套上去，
 /// 所以 `var body = g` 复制一份再翻转，不会影响原来那份（和 GraphicsContext 一样是值语义）
 struct CGPainter: PetPainter {
@@ -199,6 +202,8 @@ struct PetCGView: NSViewRepresentable {
         v.needsDisplay = true
     }
 }
+
+#endif
 
 /// 截图模式（离屏渲染）用 SwiftUI Canvas，平时用 Core Graphics
 private struct PetUsesCanvasKey: EnvironmentKey { static let defaultValue = false }

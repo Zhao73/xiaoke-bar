@@ -6,14 +6,20 @@ struct QuotaTab: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 12) {
-                ForEach(Array(model.visibleAccounts.enumerated()), id: \.element.id) { i, a in
-                    ClaudeCard(account: a).staggerIn(i)
+                if Pro.shared.hasAccess {
+                    ForEach(Array(model.visibleAccounts.enumerated()), id: \.element.id) { i, a in
+                        ClaudeCard(account: a).staggerIn(i)
+                    }
+                    let n = model.visibleAccounts.count
+                    CodexCard().staggerIn(n)
+                    GeminiCard().staggerIn(n + 1)
+                    GrokCard().staggerIn(n + 2)
+                    AddAccountCard().staggerIn(n + 3)
+                } else {
+                    // 免费版：只看主账号，其余换成一张解锁卡片
+                    if let a = model.visibleAccounts.first { ClaudeCard(account: a).staggerIn(0) }
+                    ProCard(hiddenAccounts: max(0, model.visibleAccounts.count - 1)).staggerIn(1)
                 }
-                let n = model.visibleAccounts.count
-                CodexCard().staggerIn(n)
-                GeminiCard().staggerIn(n + 1)
-                GrokCard().staggerIn(n + 2)
-                AddAccountCard().staggerIn(n + 3)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
@@ -302,17 +308,23 @@ struct LaunchRow: View {
     var body: some View {
         HStack(spacing: 6) {
             PillButton(title: L("新会话"), icon: "plus", tint: Provider.claude.tint, prominent: true) {
-                Launcher.claude(account, mode: .new, dir: model.workDir)
+                launch(.new)
             }
             PillButton(title: L("继续上次"), icon: "arrow.uturn.forward", tint: Provider.claude.tint) {
-                Launcher.claude(account, mode: .continueLast, dir: model.workDir)
+                launch(.continueLast)
             }
             PillButton(title: L("选会话"), icon: "list.bullet", tint: Provider.claude.tint) {
-                Launcher.claude(account, mode: .pick, dir: model.workDir)
+                launch(.pick)
             }
             Spacer(minLength: 0)
             WorkDirMenu()
         }
+    }
+
+    /// 一键开 / 继续 / 恢复会话是完整版功能
+    private func launch(_ mode: Launcher.ClaudeMode) {
+        guard Pro.shared.hasAccess else { Pro.shared.showPaywall = true; return }
+        Launcher.claude(account, mode: mode, dir: model.workDir)
     }
 }
 

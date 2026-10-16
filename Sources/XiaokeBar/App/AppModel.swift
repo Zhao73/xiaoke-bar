@@ -40,6 +40,24 @@ final class AppModel {
 
     // 界面
     var tab: Tab = .quota
+    /// 沙盒版设置页：每完成一步加一，让页面重新判断状态
+    var setupRevision = 0
+    var helperSkipped = UserDefaults.standard.bool(forKey: "helperSkipped")
+    var showSetup: Bool {
+        _ = setupRevision
+        return Sandbox.isOn && !Self.demo && (!HomeAccess.granted || ((!Helper.installed || Helper.outdated) && !helperSkipped))
+    }
+
+    func finishSetupStep() {
+        setupRevision += 1
+        Task { await refreshAll(); await rescan() }
+    }
+
+    func skipHelper() {
+        helperSkipped = true
+        UserDefaults.standard.set(true, forKey: "helperSkipped")
+        finishSetupStep()
+    }
     var lastRefresh: Date?
     var refreshing = false
     var celebrateUntil: Date?
@@ -88,6 +106,12 @@ final class AppModel {
     func shown(_ s: String?) -> String? { s.map { privacyMode ? Fmt.redact($0) : $0 } }
     var notifyHigh: Bool { didSet { defaults.set(notifyHigh, forKey: "notifyHigh"); if notifyHigh { requestNotify() } } }
     var notifyReset: Bool { didSet { defaults.set(notifyReset, forKey: "notifyReset"); if notifyReset { requestNotify() } } }
+    /// 电脑资源提醒：CPU / 内存持续高于阈值、磁盘剩余低于阈值时发通知
+    var notifySystem: Bool { didSet { defaults.set(notifySystem, forKey: "notifySystem"); if notifySystem { requestNotify() } } }
+    var cpuAlert: Int { didSet { defaults.set(cpuAlert, forKey: "cpuAlert") } }
+    var memAlert: Int { didSet { defaults.set(memAlert, forKey: "memAlert") } }
+    var diskAlertGB: Int { didSet { defaults.set(diskAlertGB, forKey: "diskAlertGB") } }
+    var alertLimits: ResourceAlarm.Limits { .init(cpu: Double(cpuAlert), memory: Double(memAlert), diskFreeGB: Double(diskAlertGB)) }
     var menuShowsPercent: Bool { didSet { defaults.set(menuShowsPercent, forKey: "menuShowsPercent") } }
     var menuAccount: String { didSet { defaults.set(menuAccount, forKey: "menuAccount") } }
     var nicknames: [String: String] { didSet { defaults.set(nicknames, forKey: "nicknames") } }
@@ -99,6 +123,10 @@ final class AppModel {
     var renewalOverrides: [String: Double] { didSet { defaults.set(renewalOverrides, forKey: "renewalOverrides"); applyOverrides() } }
     var floatingPet: Bool { didSet { defaults.set(floatingPet, forKey: "floatingPet") } }
     var notifyDone: Bool { didSet { defaults.set(notifyDone, forKey: "notifyDone"); if notifyDone { requestNotify() } } }
+    /// 会话停下来等你确认 / 回答时提醒
+    var notifyAsking: Bool { didSet { defaults.set(notifyAsking, forKey: "notifyAsking"); if notifyAsking { requestNotify() } } }
+    /// 额度用到百分之多少开始提醒（另外 95% 再提醒一次）
+    var quotaAlertPercent: Int { didSet { defaults.set(quotaAlertPercent, forKey: "quotaAlertPercent") } }
     var doneSound: Bool { didSet { defaults.set(doneSound, forKey: "doneSound") } }
     var petVolume: Double { didSet { defaults.set(petVolume, forKey: "petVolume") } }
     var hasDog: Bool { didSet { defaults.set(hasDog, forKey: "hasDog") } }
@@ -109,8 +137,20 @@ final class AppModel {
     var happiness: Double { didSet { if Int(happiness) != Int(oldValue) { defaults.set(happiness, forKey: "happiness") } } }
     var language: String { didSet { defaults.set(language, forKey: "language"); AppLanguage.invalidate() } }
 
-    /// 演示模式（XIAOKE_DEMO=1）：全部用编好的假数据，不联网、不扫描真实会话、设置存到单独的地方，宣传截图用
-    static let demo = ProcessInfo.processInfo.environment["XIAOKE_DEMO"] == "1"
+    /// 演示模式：全部用编好的假数据，不联网、不扫描真实会话、设置存到单独的地方。
+    /// XIAOKE_DEMO=1 给宣传截图用；App Store 版的设置页也能手动进入（审核员的电脑上没有 Claude Code，需要它看到完整功能）
+    static let demoByUser = UserDefaults.standard.bool(forKey: "demoMode")
+    static let demo = ProcessInfo.processInfo.environment["XIAOKE_DEMO"] == "1" || demoByUser
+
+    /// 进入 / 退出演示：所有数据源在启动时就定了，所以记下开关后重启 App
+    static func setDemo(_ on: Bool) {
+        UserDefaults.standard.set(on, forKey: "demoMode")
+        let cfg = NSWorkspace.OpenConfiguration()
+        cfg.createsNewApplicationInstance = true
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: cfg) { _, _ in
+            DispatchQueue.main.async { NSApp.terminate(nil) }
+        }
+    }
     private let defaults: UserDefaults = {
         guard AppModel.demo, let d = UserDefaults(suiteName: "com.zjp73.xiaokebar.demo") else { return .standard }
         d.removePersistentDomain(forName: "com.zjp73.xiaokebar.demo")
@@ -132,15 +172,22 @@ final class AppModel {
     private var tickCount = 0
 
     init() {
+        HomeAccess.restore()
         defaults.register(defaults: ["refreshMinutes": 3, "hideEmail": false, "notifyHigh": true, "notifyReset": true, "menuShowsPercent": true,
                                      "showRemaining": true, "menuMode": "ticker", "tickerItems": ["claude", "codex", "cpu", "memory", "disk"],
                                      "floatingPet": false, "notifyDone": true, "doneSound": true, "petVolume": 0.6, "language": "system",
-                                     "hasDog": true, "hasCat": true, "happiness": 70.0])
+                                     "hasDog": true, "hasCat": true, "happiness": 70.0,
+                                     "notifySystem": true, "cpuAlert": 90, "memAlert": 90, "diskAlertGB": 10,
+                                     "notifyAsking": true, "quotaAlertPercent": 80])
         refreshMinutes = defaults.integer(forKey: "refreshMinutes")
         hideEmail = defaults.bool(forKey: "hideEmail")
         privacyMode = defaults.bool(forKey: "privacyMode")
         notifyHigh = defaults.bool(forKey: "notifyHigh")
         notifyReset = defaults.bool(forKey: "notifyReset")
+        notifySystem = defaults.bool(forKey: "notifySystem")
+        cpuAlert = defaults.integer(forKey: "cpuAlert")
+        memAlert = defaults.integer(forKey: "memAlert")
+        diskAlertGB = defaults.integer(forKey: "diskAlertGB")
         menuShowsPercent = defaults.bool(forKey: "menuShowsPercent")
         menuAccount = defaults.string(forKey: "menuAccount") ?? "auto"
         nicknames = (defaults.dictionary(forKey: "nicknames") as? [String: String]) ?? [:]
@@ -152,6 +199,8 @@ final class AppModel {
         renewalOverrides = (defaults.dictionary(forKey: "renewalOverrides") as? [String: Double]) ?? [:]
         floatingPet = defaults.bool(forKey: "floatingPet")
         notifyDone = defaults.bool(forKey: "notifyDone")
+        notifyAsking = defaults.bool(forKey: "notifyAsking")
+        quotaAlertPercent = defaults.integer(forKey: "quotaAlertPercent")
         doneSound = defaults.bool(forKey: "doneSound")
         petVolume = defaults.double(forKey: "petVolume")
         hasDog = defaults.bool(forKey: "hasDog")
@@ -221,6 +270,7 @@ final class AppModel {
         if !popoverVisible, !claudeActive, tickCount % 2 == 1 { return }
         driftHappiness()
         system = monitor.sample()
+        checkSystemAlerts()
         // 进程表只在面板开着时取（为了显示每个会话的 CPU / 内存）
         let table = popoverVisible ? ProcessTable.snapshot() : []
         var list = LiveSessionFinder.find(accounts: accounts, table: table, recent: stats?.sessions ?? [])
@@ -235,6 +285,7 @@ final class AppModel {
             list[i].subagents = list[i].busy ? LiveSessionFinder.pendingSubagents(transcript: t) : 0
         }
         detectCompletions(list)
+        detectWaiting(list)
         // 实时事件：AI 说了新的话 → 宠物张嘴说话；换了工具 → 头上蹦个「!」
         let now = Date()
         for l in list {
@@ -289,16 +340,28 @@ final class AppModel {
             cheerUntil = now.addingTimeInterval(3)     // 小队里其他宠物也一起欢呼（各用各的庆祝动作）
             cheer(4)
             if doneSound { NSSound(named: "Glass")?.play() }
-            if notifyDone {
-                send(L("✅ %@ 做完了", String((shown(sessionTitle(title)) ?? "").prefix(40))),
-                     L("%@ · 用时 %@", prov.name, Fmt.duration(dur)))
-            }
+            let doneTitle = L("✅ %@ 做完了", String((shown(sessionTitle(title)) ?? "").prefix(40)))
+            let doneBody = L("%@ · 用时 %@", prov.name, Fmt.duration(dur))
+            // Mac 上关了提醒，iPhone 照样要收到
+            if notifyDone { send(.done, doneTitle, doneBody) } else { relay(.done, doneTitle, doneBody) }
             lastDone = (title, prov, now)
         }
         for s in list where s.busy && busySince[s.id] == nil { busySince[s.id] = now }
     }
 
     var lastDone: (title: String, provider: Provider, at: Date)?
+
+    /// 会话停下来等你（权限确认、提问）：进入等待状态时提醒一次
+    private var waitingIDs = Set<String>()
+    private func detectWaiting(_ list: [LiveSession]) {
+        let now = Set(list.filter(\.waiting).map(\.id))
+        for s in list where s.waiting && !waitingIDs.contains(s.id) {
+            let title = L("⏸ %@ 在等你确认", String((shown(sessionTitle(summary(for: s)?.title ?? s.name ?? s.provider.name)) ?? "").prefix(40)))
+            let body = L("%@ · 回终端看看，或在 iPhone 上处理。", s.provider.name)
+            if notifyAsking { send(.asking, title, body) } else { relay(.asking, title, body) }
+        }
+        waitingIDs = now
+    }
     /// 每个会话最近一次「AI 说新话」「换工具」的时间，驱动宠物的实时反应
     var saidAt: [String: Date] = [:]
     var toolChangedAt: [String: Date] = [:]
@@ -678,30 +741,68 @@ final class AppModel {
         guard let old, let new else { return }
         if old.percent >= 50, new.percent < 10, (old.resetsAt ?? .distantFuture) <= Date().addingTimeInterval(120) {
             celebrate(seconds: 4)
-            if notifyReset, let a = accounts.first(where: { $0.id == key }) {
-                send(L("%@ 的 5 小时额度已重置", nickname(a)), L("又可以放心用啦。"))
+            if let a = accounts.first(where: { $0.id == key }) {
+                let (title, body) = (L("%@ 的 5 小时额度已重置", nickname(a)), L("又可以放心用啦。"))
+                if notifyReset { send(.reset, title, body) } else { relay(.reset, title, body) }
             }
         }
     }
 
+    /// 额度用到设定的百分比、以及 95% 时各提醒一次（每个重置周期只提醒一次）
     private func checkNotifications() {
-        guard notifyHigh else { return }
-        for a in visibleAccounts {
-            guard let w = claudeUsage[a.id]?.fiveHour else { continue }
+        let phone = phoneWants?(.quota) ?? false
+        guard notifyHigh || phone else { return }
+        func check(_ key: String, _ who: String, _ w: QuotaWindow, weekly: Bool) {
             let stamp = w.resetsAt.map { String(Int($0.timeIntervalSince1970)) } ?? "x"
-            for level in [80.0, 95.0] where w.percent >= level {
-                let k = "\(a.id)|\(stamp)|\(Int(level))"
-                if notified.insert(k).inserted {
-                    let body = w.resetsAt.map { L("注意节奏，%@ 重置。", Fmt.shortDate($0)) } ?? L("注意节奏。")
-                    send(L("%@ 的 5 小时额度用了 %d%%", nickname(a), Int(w.percent)), body)
-                }
-            }
+            // 只提醒达到的最高一档，免得一次弹两条
+            guard let level = AlertRules.quotaLevel(percent: w.percent, setting: quotaAlertPercent) else { return }
+            let k = "\(key)|\(stamp)|\(level)"
+            guard notified.insert(k).inserted else { return }
+            let title = weekly ? L("%@ 的本周额度用了 %d%%", who, Int(w.percent)) : L("%@ 的 5 小时额度用了 %d%%", who, Int(w.percent))
+            let body = w.resetsAt.map { L("注意节奏，%@ 重置。", Fmt.shortDate($0)) } ?? L("注意节奏。")
+            if notifyHigh { send(.quota, title, body) } else { relay(.quota, title, body) }
+        }
+        for a in visibleAccounts {
+            guard let u = claudeUsage[a.id] else { continue }
+            if let w = u.fiveHour { check(a.id, nickname(a), w, weekly: false) }
+            if let w = u.weekly { check(a.id + "|week", nickname(a), w, weekly: true) }
+        }
+        for w in codex?.windows ?? [] {
+            check("codex|" + w.id, "Codex", w, weekly: w.id.contains("week") || w.title.contains("周"))
         }
         if notified.count > 200 { notified = Set(notified.suffix(100)) }
         defaults.set(Array(notified), forKey: "notified")
     }
 
-    private func send(_ title: String, _ body: String) {
+    private var resourceAlarm = ResourceAlarm()
+
+    private func checkSystemAlerts() {
+        guard notifySystem, Pro.shared.hasAccess else { return }   // 资源提醒是完整版功能
+        let s = system
+        for k in resourceAlarm.check(cpu: s.cpuPercent, memory: s.memPercent, diskFree: s.diskFree, limits: alertLimits) {
+            switch k {
+            case .cpu:
+                send(.system, L("CPU 占用持续偏高"), L("超过 %d%% 已经两分钟，现在是 %d%%。可以看看是哪个程序在占用。", cpuAlert, Int(s.cpuPercent)))
+            case .memory:
+                send(.system, L("内存快用满了"), L("已用 %d%%（%@ / %@），电脑可能会变卡。", Int(s.memPercent), s.memUsed.bytesShort, s.memTotal.bytesShort))
+            case .disk:
+                send(.system, L("磁盘空间快满了"), L("只剩 %@，低于你设的 %d GB，建议清理一下。", s.diskFree.bytesShort, diskAlertGB))
+            }
+        }
+    }
+
+    /// App Store 版用它把提醒同步推送到 iPhone
+    var onEvent: ((AlertKind, String, String) -> Void)?
+    /// iPhone 是否想收这类提醒（App Store 版由 DeskSync 设置）；Mac 上关了的提醒，iPhone 照样可以收
+    var phoneWants: ((AlertKind) -> Bool)?
+
+    enum AlertKind: String { case done, asking, quota, reset, system, schedule }
+
+    /// 只转发给 iPhone，Mac 上不弹
+    private func relay(_ kind: AlertKind, _ title: String, _ body: String) { onEvent?(kind, title, body) }
+
+    func send(_ kind: AlertKind, _ title: String, _ body: String) {
+        onEvent?(kind, title, body)
         let c = UNMutableNotificationContent()
         c.title = title; c.body = body; c.sound = .default
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: c, trigger: nil))
@@ -839,7 +940,12 @@ extension AppModel {
     fileprivate func fillDemo() {
         let now = Date()
         let zh = [.zhHans, .zhHant].contains(AppLanguage.current), ja = AppLanguage.current == .ja
-        func t(_ en: String, _ c: String, _ j: String) -> String { zh ? c : (ja ? j : en) }
+        let hant = AppLanguage.current == .zhHant
+        // 繁中界面的演示数据转成繁体字（台湾、香港的商店截图要用）
+        func t(_ en: String, _ c: String, _ j: String) -> String {
+            guard zh else { return ja ? j : en }
+            return hant ? (c.applyingTransform(StringTransform("Hans-Hant"), reverse: false) ?? c) : c
+        }
         let h = 3600.0, d = 86400.0
 
         accounts = [

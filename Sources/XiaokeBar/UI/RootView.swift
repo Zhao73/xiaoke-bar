@@ -10,21 +10,35 @@ struct RootView: View {
             if !model.busySessions.isEmpty {
                 CrewStrip().transition(.move(edge: .top).combined(with: .opacity))
             }
+            if model.showSetup {
+                SetupView().frame(maxWidth: .infinity, maxHeight: .infinity).transition(.blurReplace)
+            } else {
             tabBar
             ZStack {
                 switch model.tab {
                 case .quota: QuotaTab().transition(.blurReplace)
                 case .stats: StatsTab().transition(.blurReplace)
-                case .sessions: SessionsTab().transition(.blurReplace)
-                case .billing: BillingTab().transition(.blurReplace)
+                case .sessions:
+                    if Pro.shared.hasAccess { SessionsTab().transition(.blurReplace) }
+                    else { ProGate(title: L("会话"), detail: L("看到所有正在运行的 AI 会话，一键切到它的终端窗口，或者继续、恢复以前的会话。"), icon: "terminal.fill").transition(.blurReplace) }
+                case .billing:
+                    if Pro.shared.hasAccess { BillingTab().transition(.blurReplace) }
+                    else { ProGate(title: L("账单"), detail: L("添加 API Key 后，查看各家 API 的余额、本月花费和每天的走势。"), icon: "creditcard.fill").transition(.blurReplace) }
                 case .settings: SettingsTab().transition(.blurReplace)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .animation(.spring(duration: 0.4), value: model.tab)
+            }
             footer
         }
         .animation(.spring(duration: 0.45, bounce: 0.2), value: model.busySessions.isEmpty)
+        .overlay {
+            if Pro.shared.showPaywall {
+                PaywallView().transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.spring(duration: 0.4, bounce: 0.15), value: Pro.shared.showPaywall)
         .frame(width: 420, height: 680)
         .id(model.language)          // 换语言时整页重建
         .background(AuroraBackground(mood: model.mood))
@@ -141,11 +155,18 @@ struct RootView: View {
                 Button {
                     withAnimation(.spring(duration: 0.38, bounce: 0.22)) { model.tab = t }
                 } label: {
-                    HStack(spacing: 3) {
-                        Image(systemName: t.icon).font(.system(size: 10.5, weight: .semibold))
+                    // 德语等较长的语言放不下时：先去掉图标只留文字，再不够就只留图标
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 3) {
+                            Image(systemName: t.icon).font(.system(size: 10.5, weight: .semibold))
+                                .symbolEffect(.bounce, value: model.tab == t)
+                            Text(t.title).font(.system(size: 11.5, weight: .semibold)).lineLimit(1)
+                        }
+                        Text(t.title).font(.system(size: 11.5, weight: .semibold)).lineLimit(1)
+                        Image(systemName: t.icon).font(.system(size: 12, weight: .semibold))
                             .symbolEffect(.bounce, value: model.tab == t)
-                        Text(t.title).font(.system(size: 11.5, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.8)
                     }
+                    .help(t.title)
                     .foregroundStyle(model.tab == t ? .primary : .secondary)
                     .frame(maxWidth: .infinity).padding(.vertical, 7)
                     .background {
@@ -174,6 +195,14 @@ struct RootView: View {
             }
             Text(model.scanProgress.map { L("首次统计中… %d%%", Int($0 * 100)) } ?? L("数据只在本机读取")).font(.system(size: 9.5)).foregroundStyle(.tertiary)
             Spacer()
+            if AppModel.demoByUser {
+                Button { AppModel.setDemo(false) } label: {
+                    Label(L("退出演示"), systemImage: "xmark.circle.fill").font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(Provider.claude.tint)
+                }
+                .buttonStyle(.plain)
+                .help(L("现在显示的是示例数据"))
+            }
             Button { NSApp.terminate(nil) } label: { Text(L("退出")).font(.system(size: 10.5)).foregroundStyle(.secondary) }
                 .buttonStyle(.plain)
         }
@@ -323,28 +352,29 @@ struct SystemChips: View {
     var body: some View {
         let sys = model.system
         HStack(spacing: 10) {
-            chip("cpu", "\(Int(sys.cpuPercent.rounded()))%", fill: sys.cpuPercent / 100, help: L("CPU 已用，还剩 %d%%", Int(sys.cpuFree)))
-            chip("memorychip", "\(Int(sys.memPercent.rounded()))%", fill: sys.memPercent / 100,
+            chip("cpu", "\(Int(sys.cpuPercent.rounded()))%", fill: sys.cpuPercent / 100, hot: sys.cpuPercent >= Double(model.cpuAlert), help: L("CPU 已用，还剩 %d%%", Int(sys.cpuFree)))
+            chip("memorychip", "\(Int(sys.memPercent.rounded()))%", fill: sys.memPercent / 100, hot: sys.memPercent >= Double(model.memAlert),
                  help: L("内存已用 %@ / %@", sys.memUsed.bytesShort, sys.memTotal.bytesShort))
             chip("internaldrive", sys.diskFree > 0 ? Int64(sys.diskFree).bytesShort : "—", fill: 1 - sys.diskFreePercent / 100,
-                 help: L("磁盘还剩 %@（%d%%）", Int64(sys.diskFree).bytesShort, Int(sys.diskFreePercent)))
+                 hot: sys.diskFree > 0 && Double(sys.diskFree) < Double(model.diskAlertGB) * 1e9, help: L("磁盘还剩 %@（%d%%）", Int64(sys.diskFree).bytesShort, Int(sys.diskFreePercent)))
             chip("sum", Double(model.total(Set(Provider.allCases), .today).total).tokenShort, fill: nil, help: L("今天所有工具合计用掉的 token"))
         }
         .font(.system(size: 10, weight: .medium, design: .rounded))
         .foregroundStyle(.secondary)
     }
 
-    /// 图标 + 数字 + 一根细条（超过 85% 变橙、95% 变红）
-    private func chip(_ icon: String, _ value: String, fill: Double?, help: String) -> some View {
+    /// 图标 + 数字 + 一根细条（超过 85% 变橙；超过设置里的提醒阈值或 95% 变红，数字也变红）
+    private func chip(_ icon: String, _ value: String, fill: Double?, hot: Bool = false, help: String) -> some View {
         HStack(spacing: 3) {
             Image(systemName: icon).font(.system(size: 8.5))
             VStack(alignment: .leading, spacing: 1.5) {
                 Text(value).monospacedDigit().lineLimit(1).fixedSize()
+                    .foregroundStyle(hot ? Color.red : Color.secondary)
                 if let f = fill {
                     let v = min(1, max(0, f))
                     Capsule().fill(.primary.opacity(0.12)).frame(width: 30, height: 2.5)
                         .overlay(alignment: .leading) {
-                            Capsule().fill(v > 0.95 ? Color.red : (v > 0.85 ? .orange : .green.opacity(0.8))).frame(width: 30 * v, height: 2.5)
+                            Capsule().fill(hot || v > 0.95 ? Color.red : (v > 0.85 ? .orange : .green.opacity(0.8))).frame(width: 30 * v, height: 2.5)
                         }
                 }
             }

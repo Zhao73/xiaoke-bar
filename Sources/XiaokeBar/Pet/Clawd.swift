@@ -1,5 +1,7 @@
 import SwiftUI
+#if os(macOS)
 import AppKit
+#endif
 
 /// 四只像素宠物：
 /// - 小克（Claude）：Claude Code 启动画面里那只小螃蟹，按字符画 ▐▛███▜▌ / ▝▜█████▛▘ / ▘▘ ▝▝ 还原
@@ -146,6 +148,7 @@ enum PetArt {
         return px
     }
 
+    #if os(macOS)
     /// 菜单栏小图标：身体 16×10 格
     static func menuImage(_ k: Provider = .claude, pose: Pose = Pose(), scale: CGFloat = 1.5) -> NSImage {
         let w = 16 * scale, h = 10 * scale
@@ -162,5 +165,6 @@ enum PetArt {
         img.isTemplate = false
         return img
     }
+    #endif
 }
 

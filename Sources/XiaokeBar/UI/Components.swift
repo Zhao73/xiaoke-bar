@@ -1,5 +1,7 @@
 import SwiftUI
+#if os(macOS)
 import AppKit
+#endif
 
 // MARK: 品牌 Logo（官方矢量标志，来自 LobeHub 图标库）
 
@@ -7,6 +9,10 @@ struct Logo: View {
     var provider: Provider
     var size: CGFloat = 22
     var body: some View {
+        #if APPSTORE || !os(macOS)
+        // 商店版不用各家官方标志（商标），换成小克家族自己的像素头像
+        PixelBadge(provider: provider).frame(width: size, height: size)
+        #else
         Group {
             if let img = LogoStore.image(provider.logo) {
                 Image(nsImage: img)
@@ -19,9 +25,30 @@ struct Logo: View {
         }
         .foregroundStyle(.primary)
         .frame(width: size, height: size)
+        #endif
     }
 }
 
+/// 宠物身体的像素画，缩放到正方形里居中（商店版代替官方 Logo）
+struct PixelBadge: View {
+    var provider: Provider
+    var body: some View {
+        Canvas { g, size in
+            let px = PetArt.pixels(provider, PetArt.Pose())
+            guard let minX = px.map(\.0).min(), let maxX = px.map(\.0).max(),
+                  let minY = px.map(\.1).min(), let maxY = px.map(\.1).max() else { return }
+            let w = CGFloat(maxX - minX + 1), h = CGFloat(maxY - minY + 1)
+            let cell = min(size.width / w, size.height / h)
+            let ox = (size.width - w * cell) / 2, oy = (size.height - h * cell) / 2
+            for (x, y, c) in px {
+                g.fill(Path(CGRect(x: ox + CGFloat(x - minX) * cell, y: oy + CGFloat(y - minY) * cell, width: cell + 0.3, height: cell + 0.3)), with: .color(c))
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+#if os(macOS)
 enum LogoStore {
     private static var cache: [String: NSImage] = [:]
     static func image(_ name: String) -> NSImage? {
@@ -35,6 +62,7 @@ enum LogoStore {
         return img
     }
 }
+#endif
 
 // MARK: 颜色
 
@@ -94,7 +122,8 @@ struct RingGauge: View {
                         Text("%").font(.system(size: size * 0.13, weight: .semibold, design: .rounded)).foregroundStyle(.secondary)
                     }
                     Text(remaining ? L("%@剩余", title) : L("%@已用", title)).font(.system(size: 9.5, weight: .medium)).foregroundStyle(.secondary)
-                        .lineLimit(1).minimumScaleFactor(0.7).frame(maxWidth: size - line * 2 - 6)
+                        .lineLimit(2).multilineTextAlignment(.center).minimumScaleFactor(0.8)   // 长语言折成两行，不截断
+                        .frame(maxWidth: size - line * 2 - 6)
                 }
             }
             .frame(width: size, height: size)
@@ -141,8 +170,10 @@ struct FlowBar: View {
                     .frame(width: max(height, geo.size.width * min(1, shown)))
                     .shadow(color: colors.last!.opacity(0.4), radius: 4)
                     .overlay {
+                        #if os(macOS)
                         // 流光：Core Animation 在渲染进程里跑，不让 SwiftUI 逐帧重算
                         SweepShine().clipShape(Capsule())
+                        #endif
                     }
             }
         }

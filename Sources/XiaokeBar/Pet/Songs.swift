@@ -166,6 +166,7 @@ struct Song: Identifiable, Hashable {
 
 import SwiftUI
 
+#if os(macOS)
 /// 「弹一首歌」菜单：顶栏吉他按钮、宠物右键菜单共用
 struct SongMenuItems: View {
     @Environment(AppModel.self) private var model
@@ -184,6 +185,8 @@ struct SongMenuItems: View {
         }
     }
 }
+
+#endif
 
 /// 主奏宠物看的「旋律轨」：某一拍正在拉哪个音、弓拉到哪了。按手指位置、弓的来回画动画用。
 /// 换弓规则和二胡发声器一样（Arranger.erhuLine），画面上的换弓和听到的换弓对得上

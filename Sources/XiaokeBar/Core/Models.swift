@@ -171,13 +171,19 @@ extension Double {
         // 中文按「万 / 亿」，其他语言按 K / M / B
         let lang = AppLanguage.current
         if lang == .zhHans || lang == .zhHant || lang == .system {
-            if v >= 1e8 { return String(format: "%.2f 亿", v / 1e8) }
-            if v >= 1e4 { return String(format: v >= 1e6 ? "%.0f 万" : "%.1f 万", v / 1e4) }
+            let (yi, wan) = lang == .zhHant ? ("億", "萬") : ("亿", "万")
+            if v >= 1e8 { return String(format: "%.2f %@", v / 1e8, yi) }
+            if v >= 1e4 { return String(format: v >= 1e6 ? "%.0f %@" : "%.1f %@", v / 1e4, wan) }
             return String(format: "%.0f", v)
         }
         if lang == .ja {
             if v >= 1e8 { return String(format: "%.2f億", v / 1e8) }
             if v >= 1e4 { return String(format: v >= 1e6 ? "%.0f万" : "%.1f万", v / 1e4) }
+            return String(format: "%.0f", v)
+        }
+        if lang == .ko {  // 韩语也按「만 / 억」计数
+            if v >= 1e8 { return String(format: "%.2f억", v / 1e8) }
+            if v >= 1e4 { return String(format: v >= 1e6 ? "%.0f만" : "%.1f만", v / 1e4) }
             return String(format: "%.0f", v)
         }
         if v >= 1e9 { return String(format: "%.2fB", v / 1e9) }
@@ -189,6 +195,21 @@ extension Double {
 
 extension Int64 {
     var tokenShort: String { Double(self).tokenShort }
+}
+
+extension UInt64 {
+    /// 1.2 GB / 340 MB（十进制，和访达显示的一致）
+    var bytesShort: String {
+        let v = Double(self)
+        if v >= 1e12 { return String(format: "%.2f TB", v / 1e12) }
+        if v >= 1e9 { return String(format: v >= 1e11 ? "%.0f GB" : "%.1f GB", v / 1e9) }
+        if v >= 1e6 { return String(format: v >= 1e8 ? "%.0f MB" : "%.1f MB", v / 1e6) }
+        return String(format: "%.0f KB", v / 1e3)
+    }
+}
+
+extension Int64 {
+    var bytesShort: String { UInt64(Swift.max(0, self)).bytesShort }
 }
 
 enum Fmt {

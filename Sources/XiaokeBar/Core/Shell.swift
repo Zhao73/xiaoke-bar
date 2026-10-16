@@ -6,6 +6,8 @@ import CryptoKit
 enum Shell {
     @discardableResult
     static func run(_ launchPath: String, _ args: [String], timeout: TimeInterval = 8) -> (status: Int32, out: String) {
+        // 沙盒里不能开系统命令；需要的几件事各自走增强组件的固定动作（见 Keychain、Helper.script）
+        if Sandbox.isOn { return (-1, "") }
         let task = Process()
         task.executableURL = URL(fileURLWithPath: launchPath)
         task.arguments = args
@@ -28,6 +30,7 @@ extension Shell {
     /// 把内容从标准输入喂给命令（用于 security -i，避免令牌出现在进程列表里）
     @discardableResult
     static func run(_ launchPath: String, _ args: [String], stdin: String) -> Int32 {
+        if Sandbox.isOn { return -1 }
         let task = Process()
         task.executableURL = URL(fileURLWithPath: launchPath)
         task.arguments = args
@@ -48,8 +51,14 @@ enum Keychain {
     static func setPassword(_ value: String, service: String, account: String) -> Bool {
         let hex = Data(value.utf8).map { String(format: "%02x", $0) }.joined()
         func q(_ s: String) -> String { "\"" + s.replacingOccurrences(of: "\"", with: "\\\"") + "\"" }
+        if Sandbox.isOn { return Helper.run(["kc-write", service, account], stdin: hex + "\n").status == 0 }
         let cmd = "add-generic-password -U -a \(q(account)) -s \(q(service)) -X \(hex)\n"
         return Shell.run("/usr/bin/security", ["-i"], stdin: cmd) == 0
+    }
+
+    static func delete(service: String, account: String) {
+        if Sandbox.isOn { _ = Helper.run(["kc-delete", service, account], timeout: 4); return }
+        Shell.run("/usr/bin/security", ["delete-generic-password", "-s", service, "-a", account], timeout: 4)
     }
 
     /// 读取通用密码条目的内容；account 为空时只按 service 查。
@@ -57,7 +66,8 @@ enum Keychain {
         var args = ["find-generic-password", "-s", service]
         if let account { args += ["-a", account] }
         args.append("-w")
-        let r = Shell.run("/usr/bin/security", args, timeout: 5)
+        let r = Sandbox.isOn ? Helper.run(["kc-read", service, account ?? ""], timeout: 5)
+                             : Shell.run("/usr/bin/security", args, timeout: 5)
         guard r.status == 0 else { return nil }
         let s = r.out.trimmingCharacters(in: .whitespacesAndNewlines)
         return s.isEmpty ? nil : s
@@ -72,7 +82,7 @@ enum Hash {
 }
 
 enum Paths {
-    static let home = FileManager.default.homeDirectoryForCurrentUser.path
+    static let home = Sandbox.realHome
     static func expand(_ p: String) -> String {
         var s = p.replacingOccurrences(of: "$HOME", with: home).replacingOccurrences(of: "${HOME}", with: home)
         if s.hasPrefix("~") { s = home + s.dropFirst() }

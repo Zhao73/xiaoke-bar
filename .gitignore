@@ -4,3 +4,9 @@ dist/
 .DS_Store
 TASKS.md
 .swiftpm/
+
+# App Store / iPhone 工程（暂不公开）
+Apple/
+# 不公开的部分：iPhone 配对 / 中转 / 远程终端 / 付费解锁，以及中转服务器
+Sources/XiaokeBar/Private/
+relay/

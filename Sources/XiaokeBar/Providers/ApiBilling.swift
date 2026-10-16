@@ -53,7 +53,7 @@ enum ApiBilling {
     static func saveKey(_ key: String, for e: ApiKeyEntry) -> Bool { Keychain.setPassword(key, service: service, account: e.id) }
     static func key(for e: ApiKeyEntry) -> String? { Keychain.password(service: service, account: e.id) }
     static func deleteKey(for e: ApiKeyEntry) {
-        Shell.run("/usr/bin/security", ["delete-generic-password", "-s", service, "-a", e.id], timeout: 4)
+        Keychain.delete(service: service, account: e.id)
     }
 
     static func fetch(_ e: ApiKeyEntry) async -> ApiBill {

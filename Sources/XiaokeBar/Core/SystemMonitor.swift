@@ -19,6 +19,7 @@ enum ProcessTable {
     }()
 
     static func snapshot() -> [ProcInfo] {
+        if Sandbox.isOn { return HelperProcs.snapshot(maxAge: 0) }
         let n = proc_listallpids(nil, 0)
         guard n > 0 else { return [] }
         var pids = [Int32](repeating: 0, count: Int(n) + 64)
@@ -41,10 +42,13 @@ enum ProcessTable {
     }
 
     /// 进程的启动参数（argv）
-    static func arguments(pid: Int32) -> [String] { procArgs(pid).args }
+    static func arguments(pid: Int32) -> [String] {
+        Sandbox.isOn ? HelperProcs.arguments(pid) : procArgs(pid).args
+    }
 
     /// 进程的环境变量（用来看 CLAUDE_CONFIG_DIR 区分 claude / claude2）
     static func environment(pid: Int32) -> [String: String] {
+        if Sandbox.isOn { return HelperProcs.environment(pid) }
         var env: [String: String] = [:]
         for e in procArgs(pid).env { if let i = e.firstIndex(of: "=") { env[String(e[..<i])] = String(e[e.index(after: i)...]) } }
         return env
@@ -74,6 +78,7 @@ enum ProcessTable {
 
     /// 进程当前所在的文件夹
     static func cwd(pid: Int32) -> String? {
+        if Sandbox.isOn { return HelperProcs.cwd(pid) }
         var vi = proc_vnodepathinfo()
         let sz = Int32(MemoryLayout<proc_vnodepathinfo>.size)
         guard proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &vi, sz) == sz else { return nil }
@@ -83,7 +88,94 @@ enum ProcessTable {
         }
     }
 
-    static func isAlive(_ pid: Int32) -> Bool { kill(pid, 0) == 0 || errno == EPERM }
+    static func isAlive(_ pid: Int32) -> Bool {
+        // 沙盒里给别的进程发信号一律 EPERM，看不出死活，改查进程表
+        if Sandbox.isOn { return HelperProcs.snapshot(maxAge: 5).contains { $0.pid == pid } }
+        return kill(pid, 0) == 0 || errno == EPERM
+    }
+}
+
+/// 沙盒版：进程信息通过增强组件跑 ps / lsof 拿到。没装增强组件时返回空（只是看不到正在运行的会话）。
+enum HelperProcs {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var cache: (at: Date, procs: [ProcInfo], args: [Int32: [String]]) = (.distantPast, [], [:])
+    nonisolated(unsafe) private static var cwdCache: [Int32: String] = [:]
+    nonisolated(unsafe) private static var envCache: [Int32: [String: String]] = [:]
+
+    static func snapshot(maxAge: TimeInterval) -> [ProcInfo] {
+        lock.lock(); defer { lock.unlock() }
+        if Date().timeIntervalSince(cache.at) <= max(maxAge, 1) { return cache.procs }
+        guard Helper.installed else { return [] }
+        let r = Helper.run(["procs"], timeout: 5)
+        guard r.status == 0 else { return cache.procs }
+        var procs: [ProcInfo] = [], args: [Int32: [String]] = [:]
+        var second = false
+        for line in r.out.split(separator: "\n", omittingEmptySubsequences: true) {
+            if line == "---" { second = true; continue }
+            let f = line.split(separator: " ", maxSplits: second ? 1 : 5, omittingEmptySubsequences: true)
+            if second {
+                guard f.count == 2, let pid = Int32(f[0]) else { continue }
+                args[pid] = f[1].split(separator: " ").map(String.init)
+            } else {
+                guard f.count == 6, let pid = Int32(f[0]), let ppid = Int32(f[1]), let rss = UInt64(f[2]) else { continue }
+                procs.append(ProcInfo(pid: pid, ppid: ppid, path: String(f[5]), cpuNanos: cpuNanos(String(f[3])), rss: rss * 1024))
+                if f[4] != "??" { ttyMap[pid] = String(f[4]) } else { ttyMap[pid] = nil }
+            }
+        }
+        cache = (Date(), procs, args)
+        // 进程没了就丢掉它的缓存
+        let alive = Set(procs.map(\.pid))
+        cwdCache = cwdCache.filter { alive.contains($0.key) }
+        envCache = envCache.filter { alive.contains($0.key) }
+        return procs
+    }
+
+    nonisolated(unsafe) private static var ttyMap: [Int32: String] = [:]
+
+    /// 进程的终端名。snapshot 在别的线程里写，读也要加锁
+    static func tty(of pid: Int32) -> String? {
+        lock.lock(); defer { lock.unlock() }
+        return ttyMap[pid]
+    }
+
+    /// ps 的 time 列：「分:秒.百分秒」或「时:分:秒」
+    private static func cpuNanos(_ s: String) -> UInt64 {
+        let parts = s.split(separator: ":").compactMap { Double($0) }
+        let secs = parts.reduce(0) { $0 * 60 + $1 }
+        return UInt64(secs * 1e9)
+    }
+
+    static func arguments(_ pid: Int32) -> [String] {
+        _ = snapshot(maxAge: 5)
+        lock.lock(); defer { lock.unlock() }
+        return cache.args[pid] ?? []
+    }
+
+    static func cwd(_ pid: Int32) -> String? {
+        lock.lock()
+        if let c = cwdCache[pid] { lock.unlock(); return c }
+        lock.unlock()
+        let r = Helper.run(["cwd", String(pid)], timeout: 4)
+        guard let line = r.out.split(separator: "\n").first(where: { $0.hasPrefix("n") }) else { return nil }
+        let path = String(line.dropFirst())
+        lock.lock(); cwdCache[pid] = path; lock.unlock()
+        return path
+    }
+
+    /// ps -E 把环境变量接在命令后面；这里只关心 CLAUDE_CONFIG_DIR 这类 KEY=VALUE
+    static func environment(_ pid: Int32) -> [String: String] {
+        lock.lock()
+        if let e = envCache[pid] { lock.unlock(); return e }
+        lock.unlock()
+        let r = Helper.run(["env", String(pid)], timeout: 4)
+        var env: [String: String] = [:]
+        for tok in r.out.split(whereSeparator: { $0 == " " || $0 == "\n" }) {
+            guard let i = tok.firstIndex(of: "="), tok[..<i].allSatisfy({ $0.isUppercase || $0 == "_" || $0.isNumber }), i != tok.startIndex else { continue }
+            env[String(tok[..<i])] = String(tok[tok.index(after: i)...])
+        }
+        lock.lock(); envCache[pid] = env; lock.unlock()
+        return env
+    }
 }
 
 /// 整机状态：CPU 占用、内存、磁盘
@@ -181,17 +273,3 @@ final class SystemMonitor {
     }
 }
 
-extension UInt64 {
-    /// 1.2 GB / 340 MB（十进制，和访达显示的一致）
-    var bytesShort: String {
-        let v = Double(self)
-        if v >= 1e12 { return String(format: "%.2f TB", v / 1e12) }
-        if v >= 1e9 { return String(format: v >= 1e11 ? "%.0f GB" : "%.1f GB", v / 1e9) }
-        if v >= 1e6 { return String(format: v >= 1e8 ? "%.0f MB" : "%.1f MB", v / 1e6) }
-        return String(format: "%.0f KB", v / 1e3)
-    }
-}
-
-extension Int64 {
-    var bytesShort: String { UInt64(Swift.max(0, self)).bytesShort }
-}

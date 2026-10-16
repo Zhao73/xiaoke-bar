@@ -115,7 +115,7 @@ struct SystemStrip: View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 4) {
                 Image(systemName: icon).font(.system(size: 9.5, weight: .bold)).foregroundStyle(.secondary)
-                Text(title).font(.system(size: 10)).foregroundStyle(.secondary)
+                Text(title).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.75)
                 Spacer(minLength: 0)
                 Text(text).font(.system(size: 11.5, weight: .bold, design: .rounded)).monospacedDigit()
                     .contentTransition(.numericText(value: value))

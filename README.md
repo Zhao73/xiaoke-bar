@@ -6,7 +6,7 @@
   <a href="https://github.com/Zhao73/xiaoke-bar/releases/latest"><img src="https://img.shields.io/github/v/release/Zhao73/xiaoke-bar?color=E8835F&label=download" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/macOS-15%2B-111?logo=apple" alt="macOS 15+">
   <img src="https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white" alt="Swift 6">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-5CDB9E" alt="MIT license"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-5CDB9E" alt="GPL-3.0 license"></a>
   <a href="https://github.com/Zhao73/xiaoke-bar/stargazers"><img src="https://img.shields.io/github/stars/Zhao73/xiaoke-bar?style=social" alt="GitHub stars"></a>
 </p>
 
@@ -125,9 +125,13 @@ XIAOKE_DEMO=1 .build/release/XiaokeBar --snapshot out/    # render every screen 
 python3 scripts/l10n_check.py                             # find untranslated UI strings
 ```
 
+## iPhone companion
+
+The app on the releases page can also pair with the Xiaoke Bar iPhone app (quota and sessions on the phone, live terminal). That part is not in this repository: building from this source gives you every Mac feature, without iPhone pairing.
+
 ## Privacy
 
-- **No accounts, no server, no analytics.** The app never stores a password. It reads the credentials that Claude Code, Codex, Gemini CLI and Grok already keep on your Mac and sends them only to each vendor's own API, exactly as those tools do.
+- **No accounts, no analytics.** The only server involved is the optional end-to-end encrypted relay used by iPhone pairing in the released app; it only sees ciphertext. The app never stores a password. It reads the credentials that Claude Code, Codex, Gemini CLI and Grok already keep on your Mac and sends them only to each vendor's own API, exactly as those tools do.
 - API keys you add for billing are stored in the macOS Keychain.
 - Session logs are read locally to count tokens; the index is cached in `~/Library/Application Support/XiaokeBar/`.
 - Every screenshot in this README uses built-in demo data (`XIAOKE_DEMO=1`), not anyone's real sessions.
@@ -162,4 +166,4 @@ Service logos come from [LobeHub Icons](https://github.com/lobehub/lobe-icons) (
 
 ## License
 
-[MIT](LICENSE)
+Copyright (C) 2026 Zhao73. Released under the [GNU GPL v3.0](LICENSE). You may use, change and redistribute it, but anything you distribute that is built from this code must also be released as source under the GPL.

@@ -148,7 +148,8 @@ enum AntigravityProvider {
     }
 
     private static func listeningPorts(pid: Int32) -> [Int] {
-        let out = Shell.run("/usr/sbin/lsof", ["-nP", "-a", "-p", "\(pid)", "-iTCP", "-sTCP:LISTEN", "-Fn"], timeout: 4).out
+        let out = Sandbox.isOn ? Helper.run(["ports", "\(pid)"], timeout: 4).out
+                               : Shell.run("/usr/sbin/lsof", ["-nP", "-a", "-p", "\(pid)", "-iTCP", "-sTCP:LISTEN", "-Fn"], timeout: 4).out
         return out.split(separator: "\n").compactMap { line in
             guard line.hasPrefix("n"), let c = line.lastIndex(of: ":") else { return nil }
             return Int(line[line.index(after: c)...])

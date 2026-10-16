@@ -20,7 +20,14 @@ enum Launcher {
         do {
             try script.write(to: url, atomically: true, encoding: .utf8)
             try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
-            NSWorkspace.shared.open(url)
+            if Sandbox.isOn {
+                // 沙盒写出的文件带隔离标记，终端会拒绝运行；交给增强组件去掉标记再打开
+                DispatchQueue.global(qos: .userInitiated).async {
+                    if Helper.run(["open", url.path]).status != 0 { DispatchQueue.main.async { NSSound.beep() } }
+                }
+            } else {
+                NSWorkspace.shared.open(url)
+            }
         } catch {
             NSSound.beep()
         }

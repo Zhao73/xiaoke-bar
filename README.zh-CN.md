@@ -6,7 +6,7 @@
   <a href="https://github.com/Zhao73/xiaoke-bar/releases/latest"><img src="https://img.shields.io/github/v/release/Zhao73/xiaoke-bar?color=E8835F&label=%E4%B8%8B%E8%BD%BD" alt="最新版本"></a>
   <img src="https://img.shields.io/badge/macOS-15%2B-111?logo=apple" alt="macOS 15+">
   <img src="https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white" alt="Swift 6">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-5CDB9E" alt="MIT 许可"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-5CDB9E" alt="GPL-3.0 许可"></a>
   <a href="https://github.com/Zhao73/xiaoke-bar/stargazers"><img src="https://img.shields.io/github/stars/Zhao73/xiaoke-bar?style=social" alt="GitHub stars"></a>
 </p>
 
@@ -125,9 +125,13 @@ XIAOKE_DEMO=1 .build/release/XiaokeBar --snapshot out/    # 用内置假数据�
 python3 scripts/l10n_check.py                             # 检查漏翻的界面文字
 ```
 
+## iPhone 配合
+
+发布页下载的 App 还能和小克额度栏 iPhone App 配对（手机上看额度、会话和实时终端）。这部分源码不在本仓库：用这里的源码自己编译，可以得到全部 Mac 功能，但没有 iPhone 配对。
+
 ## 隐私
 
-- **不用注册、没有服务器、不做统计。** App 不保存任何密码，只读取 Claude Code、Codex、Gemini CLI、Grok 已经存在你 Mac 上的登录凭证，并且只发给它们各自的官方接口，和这些工具自己做的事一样。
+- **不用注册、不做统计。** 唯一可能用到的服务器是发布版 iPhone 配对用的端到端加密中转，它只能看到密文。App 不保存任何密码，只读取 Claude Code、Codex、Gemini CLI、Grok 已经存在你 Mac 上的登录凭证，并且只发给它们各自的官方接口，和这些工具自己做的事一样。
 - 为账单添加的 API Key 存在系统钥匙串里。
 - 会话记录只在本机读取来统计 Token，索引缓存在 `~/Library/Application Support/XiaokeBar/`。
 - 本 README 里的所有截图都是内置演示数据（`XIAOKE_DEMO=1`），不是任何人的真实会话。
@@ -162,4 +166,4 @@ Sources/XiaokeBar/
 
 ## 许可
 
-[MIT](LICENSE)
+Copyright (C) 2026 Zhao73。以 [GNU GPL v3.0](LICENSE) 发布。可以自由使用、修改和再分发，但基于这份代码分发的软件也必须以 GPL 公开源码。

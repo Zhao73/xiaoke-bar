@@ -69,6 +69,7 @@ struct SettingsTab: View {
                 section(L("宠物与提醒"), icon: "pawprint.fill") {
                     SwitchRow(title: L("桌面宠物（浮在最前面，显示会话进展）"), isOn: $m.floatingPet)
                     SwitchRow(title: L("任务做完时发通知"), isOn: $m.notifyDone)
+                    SwitchRow(title: L("会话停下来等你确认时发通知"), isOn: $m.notifyAsking)
                     SwitchRow(title: L("任务做完时播放提示音"), isOn: $m.doneSound)
                     SwitchRow(title: L("养一只柴犬（空闲时会去遛狗、玩球）"), isOn: $m.hasDog)
                     SwitchRow(title: L("养一只橘猫（空闲时会趴头上、一起睡）"), isOn: $m.hasCat)
@@ -85,10 +86,37 @@ struct SettingsTab: View {
                             .help(L("试听"))
                     }
                     Divider().opacity(0.5)
-                    SwitchRow(title: L("5 小时额度用到 80% 和 95% 时提醒"), isOn: $m.notifyHigh)
+                    SwitchRow(title: L("额度快用完时提醒（5 小时和每周）"), isOn: $m.notifyHigh)
+                    if model.notifyHigh {
+                        AlertLimitRow(icon: "gauge.with.needle", title: L("用到这个比例时提醒（95% 再提醒一次）"), value: $m.quotaAlertPercent, range: 50...95, step: 5, unit: "%")
+                    }
                     SwitchRow(title: L("额度重置后提醒"), isOn: $m.notifyReset)
+                    Divider().opacity(0.5)
+                    if Pro.shared.hasAccess {
+                        SwitchRow(title: L("电脑资源紧张时提醒"), isOn: $m.notifySystem)
+                    } else {
+                        HStack {
+                            Text(L("电脑资源紧张时提醒"))
+                            Spacer()
+                            Button { Pro.shared.showPaywall = true } label: { Label(L("完整版功能"), systemImage: "lock.fill") }
+                        }
+                        .font(.system(size: 12))
+                    }
+                    if model.notifySystem && Pro.shared.hasAccess {
+                        AlertLimitRow(icon: "cpu", title: L("CPU 持续 2 分钟超过"), value: $m.cpuAlert, range: 50...100, step: 5, unit: "%")
+                        AlertLimitRow(icon: "memorychip", title: L("内存超过"), value: $m.memAlert, range: 50...99, step: 5, unit: "%")
+                        AlertLimitRow(icon: "internaldrive", title: L("磁盘剩余少于"), value: $m.diskAlertGB, range: 1...200, step: 1, unit: " GB")
+                    }
                 }
                 .staggerIn(3)
+
+                #if APPSTORE
+                proSection.staggerIn(4)
+                #endif
+                #if XIAOKE_PRIVATE && (!APPSTORE || IPHONE_SYNC)
+                if !AppModel.demo { PhoneSyncSection().staggerIn(4) }
+                #endif
+                if Sandbox.isOn && !AppModel.demo { helperSection.staggerIn(4) }
 
                 section(L("其他"), icon: "gearshape.fill") {
                     Picker(L("额度刷新间隔"), selection: $m.refreshMinutes) {
@@ -106,7 +134,8 @@ struct SettingsTab: View {
                     Text(L("额度数据直接读取各工具已登录的凭证，只发给它们的官方接口（api.anthropic.com、chatgpt.com、cloudcode-pa.googleapis.com、grok.com），不经过任何第三方。API Key 只存在钥匙串里。"))
                         .font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     HStack {
-                        Text(L("小克额度栏 %@", "1.1")).font(.system(size: 10)).foregroundStyle(.tertiary)
+                        Text(L("小克额度栏 %@", Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.1"))
+                            .font(.system(size: 10)).foregroundStyle(.tertiary)
                         Spacer()
                         Button(L("退出")) { NSApp.terminate(nil) }.keyboardShortcut("q")
                     }
@@ -120,6 +149,53 @@ struct SettingsTab: View {
         .onAppear { loginOn = model.launchAtLogin }
         .alert(item: Binding(get: { confirmPlan.map { PlanBox(plan: $0) } }, set: { confirmPlan = $0?.plan })) { box in
             Self.createAlert(box, model: model)
+        }
+    }
+
+    #if APPSTORE
+    /// App Store 版：完整版状态、购买入口、恢复购买、隐私政策
+    private var proSection: some View {
+        section(L("完整版"), icon: "sparkles") {
+            HStack(spacing: 8) {
+                Image(systemName: Pro.shared.purchased ? "checkmark.seal.fill" : "lock.fill")
+                    .foregroundStyle(Pro.shared.purchased ? .green : Provider.claude.tint)
+                Text(Pro.shared.purchased ? L("已解锁完整版") : L("免费版"))
+                    .font(.system(size: 12, weight: .medium))
+                Spacer()
+                if !Pro.shared.purchased {
+                    Button(L("查看完整版")) { Pro.shared.showPaywall = true }
+                }
+                Button(L("恢复购买")) { Task { await Pro.shared.restore() } }
+            }
+            .font(.system(size: 11.5))
+            Link(L("隐私政策"), destination: URL(string: "https://github.com/Zhao73/xiaoke-bar/blob/main/PRIVACY.md")!)
+                .font(.system(size: 11))
+        }
+    }
+    #endif
+
+    /// App Store 版：增强组件的状态。第一次设置时跳过了，或者脚本版本旧了，可以在这里补装
+    private var helperSection: some View {
+        let _ = model.setupRevision
+        let ok = Helper.installed && !Helper.outdated
+        return section(L("增强组件"), icon: "wrench.and.screwdriver.fill") {
+            HStack(spacing: 8) {
+                Image(systemName: ok ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                    .foregroundStyle(ok ? .green : .orange)
+                Text(ok ? L("已安装") : (Helper.outdated ? L("有新版本，需要更新") : L("未安装")))
+                    .font(.system(size: 12, weight: .medium))
+                Spacer()
+                if !ok {
+                    Button(Helper.outdated ? L("更新增强组件") : L("安装增强组件")) {
+                        if Helper.install() { model.finishSetupStep() }
+                    }
+                } else if let f = Helper.folder {
+                    Button(L("在访达中显示")) { NSWorkspace.shared.activateFileViewerSelecting([f.appendingPathComponent(Helper.fileName)]) }
+                }
+            }
+            .font(.system(size: 11.5))
+            Text(L("有了它才能显示 Claude Code 的额度、看到正在运行的会话、在终端里打开会话。删除脚本文件即可停用。"))
+                .font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -195,5 +271,26 @@ struct SwitchRow: View {
             Spacer(minLength: 8)
             Toggle("", isOn: $isOn).labelsHidden().toggleStyle(.switch).controlSize(.small)
         }
+    }
+}
+
+/// 资源提醒的一个阈值：图标 + 说明 + 数值 + 加减
+struct AlertLimitRow: View {
+    var icon: String
+    var title: String
+    @Binding var value: Int
+    var range: ClosedRange<Int>
+    var step: Int
+    var unit: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon).font(.system(size: 10)).foregroundStyle(.secondary).frame(width: 14)
+            Text(title).font(.system(size: 11.5))
+            Spacer()
+            Text("\(value)\(unit)").font(.system(size: 11.5, weight: .semibold, design: .rounded)).monospacedDigit()
+            Stepper("", value: $value, in: range, step: step).labelsHidden().controlSize(.small)
+        }
+        .padding(.leading, 4)
     }
 }

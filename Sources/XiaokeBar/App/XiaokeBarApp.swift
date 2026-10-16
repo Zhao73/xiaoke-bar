@@ -7,6 +7,10 @@ struct XiaokeBarApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     init() {
+        // 沙盒版：先恢复个人文件夹的访问权限，后面读 ~/.claude 等才不会失败
+        HomeAccess.restore()
+        // 打印增强组件脚本（App Store 版也可以手动安装：存到 ~/Library/Application Scripts/<bundle id>/xiaoke-helper.sh）
+        if CommandLine.arguments.contains("--print-helper") { print(Helper.script); exit(0) }
         // 命令行自检：XiaokeBar --selftest 打印扫描结果，方便核对数字
         if CommandLine.arguments.contains("--selftest") {
             SelfTest.run()
@@ -71,7 +75,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             }
         }
         if ProcessInfo.processInfo.environment["XIAOKE_DEBUG_PET"] == "1" { model.floatingPet = true }
+        Pro.shared.start()
+        #if XIAOKE_PRIVATE && (!APPSTORE || IPHONE_SYNC)
+        // 额度和会话同步到 iPhone，执行 iPhone 发来的指令。App Store 版走 iCloud（IPHONE_SYNC 编译条件），
+        // 两个版本都能扫码配对走实时中转
+        if !AppModel.demo { DeskSync.shared.start(model: model) }
+        #endif
     }
+
+    #if XIAOKE_PRIVATE && APPSTORE && IPHONE_SYNC
+    func application(_ application: NSApplication, didReceiveRemoteNotification userInfo: [String: Any]) {
+        DeskSync.shared.remoteNotification()
+    }
+    #endif
 
     /// 只追踪菜单栏需要的几个值，变了才重画
     private func observe() {
@@ -156,10 +172,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         let out = NSMutableAttributedString(string: " ")
         let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
         var icon: NSImage?
+        #if APPSTORE
+        // 商店版不用官方标志，用宠物像素小图
+        if let p = e.provider { icon = PetArt.menuImage(p, scale: 0.8) }
+        #else
         if let p = e.provider, let logo = LogoStore.image(p.logo)?.copy() as? NSImage {
             logo.size = NSSize(width: 12, height: 12)
             logo.isTemplate = p == .grok
             icon = logo
+        }
+        #endif
+        if icon != nil {
         } else if let s = e.symbol {
             icon = NSImage(systemSymbolName: s, accessibilityDescription: nil)?
                 .withSymbolConfiguration(.init(pointSize: 11, weight: .semibold))

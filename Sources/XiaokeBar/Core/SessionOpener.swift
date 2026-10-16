@@ -11,6 +11,10 @@ enum SessionOpener {
         guard s.pid > 0, let app = hostApp(of: s.pid) else { return nil }
         let tty = ttyName(of: s.pid)
         switch app.bundleIdentifier {
+        case "com.apple.Terminal" where tty != nil && Sandbox.isOn:
+            focusTabViaHelper("terminal", tty!)
+        case "com.googlecode.iterm2" where tty != nil && Sandbox.isOn:
+            focusTabViaHelper("iterm", tty!)
         case "com.apple.Terminal" where tty != nil:
             runAppleScript("""
             tell application "Terminal"
@@ -60,6 +64,7 @@ enum SessionOpener {
     }
 
     private static func parent(of pid: Int32) -> Int32? {
+        if Sandbox.isOn { return HelperProcs.snapshot(maxAge: 5).first { $0.pid == pid }?.ppid }
         var info = kinfo_proc()
         var size = MemoryLayout<kinfo_proc>.stride
         var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
@@ -68,7 +73,8 @@ enum SessionOpener {
     }
 
     /// 进程的终端名，比如 "ttys003"；没有终端（桌面 App 里跑的）返回 nil
-    private static func ttyName(of pid: Int32) -> String? {
+    static func ttyName(of pid: Int32) -> String? {
+        if Sandbox.isOn { _ = HelperProcs.snapshot(maxAge: 5); return HelperProcs.tty(of: pid) }
         var info = kinfo_proc()
         var size = MemoryLayout<kinfo_proc>.stride
         var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
@@ -76,6 +82,11 @@ enum SessionOpener {
         let dev = info.kp_eproc.e_tdev
         guard dev != -1, dev != 0, let name = devname(dev, S_IFCHR) else { return nil }
         return String(cString: name)
+    }
+
+    /// 沙盒里不能直接发 Apple 事件：增强组件用固定的 AppleScript 切标签页，只接收终端种类和 tty 名
+    private static func focusTabViaHelper(_ terminal: String, _ tty: String) {
+        DispatchQueue.global(qos: .userInitiated).async { _ = Helper.run(["focus-tab", terminal, tty]) }
     }
 
     private static func runAppleScript(_ src: String) {

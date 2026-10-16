@@ -4,7 +4,7 @@
 #      SIGN_ID="Developer ID Application: …" ./scripts/build-app.sh   用开发者证书签名（强化运行时，可公证）
 set -euo pipefail
 cd "$(dirname "$0")/.."
-VERSION="1.1.0"
+VERSION="1.2.1"
 APP="dist/小克额度栏.app"
 swift build -c release --arch arm64
 rm -rf "$APP"
@@ -29,6 +29,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>NSHighResolutionCapable</key><true/>
   <key>NSAppleEventsUsageDescription</key><string>点桌面宠物的气泡时，切到这个会话所在的终端标签页。</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
+  <key>CFBundleDevelopmentRegion</key><string>zh-Hans</string>
+  <key>CFBundleLocalizations</key><array><string>zh-Hans</string><string>zh-Hant</string><string>en</string><string>ja</string><string>ko</string><string>de</string><string>fr</string><string>es</string><string>it</string><string>pt-BR</string></array>
 </dict></plist>
 PLIST
 if [[ -n "${SIGN_ID:-}" ]]; then

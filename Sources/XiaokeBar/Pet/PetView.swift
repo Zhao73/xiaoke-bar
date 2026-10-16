@@ -1,5 +1,7 @@
 import SwiftUI
+#if os(macOS)
 import AppKit
+#endif
 
 /// 会动的宠物 + 道具。整块画布 26×16 格：身体在 (3, 5) 开始的 16×10 格，右边 7 列、上面 5 行放道具和特效。
 /// 用 TimelineView 每秒 8 帧刷新：像素画本来就是低帧率风格，还省电。
@@ -57,7 +59,9 @@ struct PetView: View {
                     Canvas { g, _ in var p = SwiftUIPainter(g: g); render(&p, t: t) }
                 }
             } else {
+                #if os(macOS)
                 PetCGView(pet: self)
+                #endif
             }
         }
         .frame(width: (Self.cols + wander * 2) * pixel, height: Self.rows * pixel)
@@ -659,6 +663,7 @@ struct PetView: View {
     }
 }
 
+#if os(macOS)
 /// 能玩的宠物：眼睛跟着鼠标，单击跳一下冒爱心，双击随机表演，鼠标来回蹭就是摸头。
 /// 顶栏、工作小队卡片、桌面宠物都用它。
 struct InteractivePet: View {
@@ -803,6 +808,8 @@ extension InteractivePet {
                   alertAt: model.toolChangedAt[s.id], minions: s.subagents, strain: s.cpu / 100, rowID: s.id)
     }
 }
+
+#endif
 
 /// 打字机效果：文字变了就从头一个字一个字冒出来
 struct TypewriterText: View {
